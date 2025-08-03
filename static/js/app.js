@@ -31,6 +31,7 @@ function setupDragAndDrop() {
         e.preventDefault();
         this.classList.remove('dragover');
         const files = e.dataTransfer.files;
+        console.log('Video files dropped:', files.length);
         handleVideoFiles(files);
     });
 
@@ -49,6 +50,7 @@ function setupDragAndDrop() {
         e.preventDefault();
         this.classList.remove('dragover');
         const files = e.dataTransfer.files;
+        console.log('Audio file dropped:', files.length);
         if (files.length > 0) {
             handleAudioFile(files[0]);
         }
@@ -86,16 +88,17 @@ function setupFileInputs() {
     });
 }
 
-// Global variable to store selected video files
-let selectedVideoFiles = [];
+
 
 // Handle video files
 function handleVideoFiles(files) {
+    console.log('handleVideoFiles called with', files.length, 'files');
     const fileList = document.getElementById('videoFileList');
     fileList.innerHTML = '';
     selectedVideoFiles = [];
 
     Array.from(files).forEach(file => {
+        console.log('Processing file:', file.name, 'Valid:', isValidVideoFile(file));
         if (isValidVideoFile(file)) {
             selectedVideoFiles.push(file);
             const fileItem = document.createElement('div');
@@ -107,6 +110,7 @@ function handleVideoFiles(files) {
             fileList.appendChild(fileItem);
         }
     });
+    console.log('Selected video files:', selectedVideoFiles.length);
 }
 
 // Handle audio file
