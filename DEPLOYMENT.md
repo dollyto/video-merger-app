@@ -86,7 +86,7 @@ python app.py
 ```
 
 ### Access Locally
-- Open your browser to `http://localhost:5000`
+- Open your browser to `http://localhost:8080`
 
 ## Features Available in Web App
 
