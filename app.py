@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # File size configuration (in bytes)
-MAX_FILE_SIZE = int(os.environ.get('MAX_FILE_SIZE', 1024 * 1024 * 1024))  # 1GB default
-app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
+MAX_FILE_SIZE = int(os.environ.get('MAX_FILE_SIZE', 500 * 1024 * 1024))  # 500MB per file
+MAX_TOTAL_SIZE = int(os.environ.get('MAX_TOTAL_SIZE', 1024 * 1024 * 1024))  # 1GB total
+app.config['MAX_CONTENT_LENGTH'] = MAX_TOTAL_SIZE
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'output'
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-change-this')
@@ -41,6 +42,17 @@ def allowed_file(filename, allowed_extensions):
     """Check if file extension is allowed."""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
+
+def format_file_size(size_bytes):
+    """Format file size in human readable format."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes // 1024} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes // (1024 * 1024)} MB"
+    else:
+        return f"{size_bytes // (1024 * 1024 * 1024)} GB"
 
 def cleanup_old_files():
     """Clean up old uploaded and output files (older than 1 hour)."""
@@ -75,16 +87,32 @@ def merge_videos():
         if not files or files[0].filename == '':
             return jsonify({'error': 'No files selected'}), 400
         
-        # Validate files
+        # Validate files and check sizes
         video_files = []
+        total_size = 0
+        
         for file in files:
             if file and allowed_file(file.filename, ALLOWED_VIDEO_EXTENSIONS):
+                # Check individual file size
+                file.seek(0, 2)  # Seek to end
+                file_size = file.tell()
+                file.seek(0)  # Reset to beginning
+                
+                if file_size > MAX_FILE_SIZE:
+                    return jsonify({'error': f'File {file.filename} is too large. Maximum size is {format_file_size(MAX_FILE_SIZE)}'}), 400
+                
+                total_size += file_size
+                
                 filename = secure_filename(file.filename)
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(filepath)
                 video_files.append(filepath)
             else:
                 return jsonify({'error': f'Invalid file type: {file.filename}'}), 400
+        
+        # Check total size
+        if total_size > MAX_TOTAL_SIZE:
+            return jsonify({'error': f'Total file size ({format_file_size(total_size)}) exceeds limit ({format_file_size(MAX_TOTAL_SIZE)})'}), 400
         
         if len(video_files) < 2:
             return jsonify({'error': 'At least 2 video files are required'}), 400
@@ -135,6 +163,14 @@ def convert_audio():
         
         if not allowed_file(file.filename, ALLOWED_AUDIO_EXTENSIONS):
             return jsonify({'error': f'Invalid file type: {file.filename}'}), 400
+        
+        # Check file size
+        file.seek(0, 2)  # Seek to end
+        file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({'error': f'File {file.filename} is too large. Maximum size is {format_file_size(MAX_FILE_SIZE)}'}), 400
         
         # Save uploaded file
         filename = secure_filename(file.filename)
