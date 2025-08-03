@@ -21,7 +21,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
+
+# File size configuration (in bytes)
+MAX_FILE_SIZE = int(os.environ.get('MAX_FILE_SIZE', 1024 * 1024 * 1024))  # 1GB default
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'output'
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-change-this')
