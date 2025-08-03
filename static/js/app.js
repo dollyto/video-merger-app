@@ -1,6 +1,8 @@
 // Global variables
 let currentDownloadUrl = '';
 let currentFilename = '';
+let selectedVideoFiles = [];
+let selectedAudioFile = null;
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
@@ -84,13 +86,18 @@ function setupFileInputs() {
     });
 }
 
+// Global variable to store selected video files
+let selectedVideoFiles = [];
+
 // Handle video files
 function handleVideoFiles(files) {
     const fileList = document.getElementById('videoFileList');
     fileList.innerHTML = '';
+    selectedVideoFiles = [];
 
     Array.from(files).forEach(file => {
         if (isValidVideoFile(file)) {
+            selectedVideoFiles.push(file);
             const fileItem = document.createElement('div');
             fileItem.className = 'file-item';
             fileItem.innerHTML = `
@@ -105,6 +112,7 @@ function handleVideoFiles(files) {
 // Handle audio file
 function handleAudioFile(file) {
     if (isValidAudioFile(file)) {
+        selectedAudioFile = file;
         const fileInfo = document.getElementById('audioFileInfo');
         fileInfo.innerHTML = `
             <div class="file-item">
@@ -140,17 +148,16 @@ function formatFileSize(bytes) {
 
 // Merge videos function
 function mergeVideos() {
-    const videoFilesInput = document.getElementById('videoFiles');
     const method = document.getElementById('mergeMethod').value;
     const outputName = document.getElementById('outputName').value;
 
-    if (videoFilesInput.files.length < 2) {
+    if (selectedVideoFiles.length < 2) {
         showError('Please select at least 2 video files.');
         return;
     }
 
     const formData = new FormData();
-    Array.from(videoFilesInput.files).forEach(file => {
+    selectedVideoFiles.forEach(file => {
         formData.append('files', file);
     });
     formData.append('method', method);
@@ -184,7 +191,6 @@ function mergeVideos() {
 
 // Convert audio function
 function convertAudio() {
-    const audioFileInput = document.getElementById('audioFile');
     const resolutionWidth = document.getElementById('resolutionWidth').value;
     const resolutionHeight = document.getElementById('resolutionHeight').value;
     const fps = document.getElementById('fps').value;
@@ -193,13 +199,13 @@ function convertAudio() {
     const colorB = document.getElementById('colorB').value;
     const outputName = document.getElementById('audioOutputName').value;
 
-    if (audioFileInput.files.length === 0) {
+    if (!selectedAudioFile) {
         showError('Please select an audio file.');
         return;
     }
 
     const formData = new FormData();
-    formData.append('file', audioFileInput.files[0]);
+    formData.append('file', selectedAudioFile);
     formData.append('resolution_width', resolutionWidth);
     formData.append('resolution_height', resolutionHeight);
     formData.append('fps', fps);
