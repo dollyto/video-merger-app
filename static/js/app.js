@@ -94,23 +94,122 @@ function setupFileInputs() {
 function handleVideoFiles(files) {
     console.log('handleVideoFiles called with', files.length, 'files');
     const fileList = document.getElementById('videoFileList');
-    fileList.innerHTML = '';
+    fileList.innerHTML = `
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong>Tip:</strong> Drag files to reorder them. Videos will be merged in the order shown below.
+        </div>
+    `;
     selectedVideoFiles = [];
 
     Array.from(files).forEach(file => {
         console.log('Processing file:', file.name, 'Valid:', isValidVideoFile(file));
         if (isValidVideoFile(file)) {
             selectedVideoFiles.push(file);
-            const fileItem = document.createElement('div');
-            fileItem.className = 'file-item';
-            fileItem.innerHTML = `
-                <span><i class="fas fa-video me-2"></i>${file.name}</span>
-                <span class="text-muted">${formatFileSize(file.size)}</span>
-            `;
-            fileList.appendChild(fileItem);
+            addFileItem(file, selectedVideoFiles.length - 1);
         }
     });
     console.log('Selected video files:', selectedVideoFiles.length);
+    setupFileReordering();
+}
+
+// Add file item to the list
+function addFileItem(file, index) {
+    const fileList = document.getElementById('videoFileList');
+    const fileItem = document.createElement('div');
+    fileItem.className = 'file-item';
+    fileItem.draggable = true;
+    fileItem.dataset.index = index;
+    fileItem.innerHTML = `
+        <div style="display: flex; align-items: center;">
+            <div class="file-order">${index + 1}</div>
+            <i class="fas fa-grip-vertical drag-handle me-2"></i>
+            <span><i class="fas fa-video me-2"></i>${file.name}</span>
+        </div>
+        <span class="text-muted">${formatFileSize(file.size)}</span>
+    `;
+    fileList.appendChild(fileItem);
+}
+
+// Setup file reordering functionality
+function setupFileReordering() {
+    const fileItems = document.querySelectorAll('#videoFileList .file-item');
+    
+    fileItems.forEach(item => {
+        item.addEventListener('dragstart', handleDragStart);
+        item.addEventListener('dragend', handleDragEnd);
+        item.addEventListener('dragover', handleDragOver);
+        item.addEventListener('drop', handleDrop);
+        item.addEventListener('dragenter', handleDragEnter);
+        item.addEventListener('dragleave', handleDragLeave);
+    });
+}
+
+// Drag and drop event handlers
+function handleDragStart(e) {
+    e.target.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.target.outerHTML);
+}
+
+function handleDragEnd(e) {
+    e.target.classList.remove('dragging');
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+function handleDragEnter(e) {
+    e.preventDefault();
+    e.target.closest('.file-item').classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+    e.target.closest('.file-item').classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    const draggedItem = document.querySelector('.dragging');
+    const dropTarget = e.target.closest('.file-item');
+    
+    if (draggedItem && dropTarget && draggedItem !== dropTarget) {
+        const draggedIndex = parseInt(draggedItem.dataset.index);
+        const dropIndex = parseInt(dropTarget.dataset.index);
+        
+        // Reorder the selectedVideoFiles array
+        const [movedFile] = selectedVideoFiles.splice(draggedIndex, 1);
+        selectedVideoFiles.splice(dropIndex, 0, movedFile);
+        
+        // Reorder the DOM elements
+        if (draggedIndex < dropIndex) {
+            dropTarget.parentNode.insertBefore(draggedItem, dropTarget.nextSibling);
+        } else {
+            dropTarget.parentNode.insertBefore(draggedItem, dropTarget);
+        }
+        
+        // Update order numbers
+        updateFileOrderNumbers();
+    }
+    
+    // Remove drag-over class
+    document.querySelectorAll('.file-item').forEach(item => {
+        item.classList.remove('drag-over');
+    });
+}
+
+// Update the order numbers displayed on file items
+function updateFileOrderNumbers() {
+    const fileItems = document.querySelectorAll('#videoFileList .file-item');
+    fileItems.forEach((item, index) => {
+        item.dataset.index = index;
+        const orderNumber = item.querySelector('.file-order');
+        if (orderNumber) {
+            orderNumber.textContent = index + 1;
+        }
+    });
 }
 
 // Handle audio file
