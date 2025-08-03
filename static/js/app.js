@@ -126,7 +126,12 @@ function addFileItem(file, index) {
             <i class="fas fa-grip-vertical drag-handle me-2"></i>
             <span><i class="fas fa-video me-2"></i>${file.name}</span>
         </div>
-        <span class="text-muted">${formatFileSize(file.size)}</span>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="text-muted">${formatFileSize(file.size)}</span>
+            <button class="btn btn-sm btn-outline-danger delete-btn" onclick="deleteFile(${index})" title="Remove file">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
     `;
     fileList.appendChild(fileItem);
 }
@@ -200,6 +205,42 @@ function handleDrop(e) {
     });
 }
 
+// Delete a file from the list
+function deleteFile(index) {
+    const fileName = selectedVideoFiles[index].name;
+    
+    // Show confirmation dialog
+    if (confirm(`Are you sure you want to remove "${fileName}" from the merge list?`)) {
+        // Remove file from array
+        selectedVideoFiles.splice(index, 1);
+        
+        // Remove file item from DOM
+        const fileItems = document.querySelectorAll('#videoFileList .file-item');
+        if (fileItems[index]) {
+            fileItems[index].remove();
+        }
+        
+        // Update order numbers for remaining files
+        updateFileOrderNumbers();
+        
+        // Re-setup drag and drop for remaining items
+        setupFileReordering();
+        
+        console.log('File deleted at index', index, 'Remaining files:', selectedVideoFiles.length);
+        
+        // Show feedback if no files remain
+        if (selectedVideoFiles.length === 0) {
+            const fileList = document.getElementById('videoFileList');
+            fileList.innerHTML = `
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Tip:</strong> Drag files to reorder them. Videos will be merged in the order shown below.
+                </div>
+            `;
+        }
+    }
+}
+
 // Update the order numbers displayed on file items
 function updateFileOrderNumbers() {
     const fileItems = document.querySelectorAll('#videoFileList .file-item');
@@ -208,6 +249,12 @@ function updateFileOrderNumbers() {
         const orderNumber = item.querySelector('.file-order');
         if (orderNumber) {
             orderNumber.textContent = index + 1;
+        }
+        
+        // Update delete button onclick with new index
+        const deleteBtn = item.querySelector('.delete-btn');
+        if (deleteBtn) {
+            deleteBtn.onclick = () => deleteFile(index);
         }
     });
 }
