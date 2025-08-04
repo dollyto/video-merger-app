@@ -7,11 +7,15 @@ import os
 import uuid
 import tempfile
 import shutil
+import gc
+import signal
+import time
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
 from werkzeug.utils import secure_filename
 import logging
 from datetime import datetime
+import threading
 
 from video_merger import VideoMerger
 from audio_to_video import AudioToVideoConverter
@@ -22,9 +26,9 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# File size configuration (in bytes)
-MAX_FILE_SIZE = int(os.environ.get('MAX_FILE_SIZE', 500 * 1024 * 1024))  # 500MB per file
-MAX_TOTAL_SIZE = int(os.environ.get('MAX_TOTAL_SIZE', 1024 * 1024 * 1024))  # 1GB total
+# File size configuration (in bytes) - Reduced for free tier
+MAX_FILE_SIZE = int(os.environ.get('MAX_FILE_SIZE', 100 * 1024 * 1024))  # 100MB per file
+MAX_TOTAL_SIZE = int(os.environ.get('MAX_TOTAL_SIZE', 200 * 1024 * 1024))  # 200MB total
 app.config['MAX_CONTENT_LENGTH'] = MAX_TOTAL_SIZE
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'output'
@@ -37,6 +41,17 @@ os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 # Allowed file extensions
 ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'webm', 'm4v'}
 ALLOWED_AUDIO_EXTENSIONS = {'mov', 'mp3', 'wav', 'aac', 'm4a', 'flac', 'ogg', 'wma'}
+
+# Global timeout for video processing (5 minutes)
+PROCESSING_TIMEOUT = 300
+
+class TimeoutError(Exception):
+    """Custom timeout exception."""
+    pass
+
+def timeout_handler(signum, frame):
+    """Handle timeout signal."""
+    raise TimeoutError("Processing timeout")
 
 def allowed_file(filename, allowed_extensions):
     """Check if file extension is allowed."""
@@ -55,7 +70,7 @@ def format_file_size(size_bytes):
         return f"{size_bytes // (1024 * 1024 * 1024)} GB"
 
 def cleanup_old_files():
-    """Clean up old uploaded and output files (older than 1 hour)."""
+    """Clean up old uploaded and output files (older than 30 minutes)."""
     current_time = datetime.now()
     for folder in [app.config['UPLOAD_FOLDER'], app.config['OUTPUT_FOLDER']]:
         if os.path.exists(folder):
@@ -63,12 +78,47 @@ def cleanup_old_files():
                 filepath = os.path.join(folder, filename)
                 if os.path.isfile(filepath):
                     file_time = datetime.fromtimestamp(os.path.getctime(filepath))
-                    if (current_time - file_time).total_seconds() > 3600:  # 1 hour
+                    if (current_time - file_time).total_seconds() > 1800:  # 30 minutes
                         try:
                             os.remove(filepath)
                             logger.info(f"Cleaned up old file: {filepath}")
                         except Exception as e:
                             logger.error(f"Error cleaning up {filepath}: {e}")
+
+def cleanup_files(file_paths):
+    """Clean up uploaded files."""
+    for filepath in file_paths:
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                logger.info(f"Cleaned up: {filepath}")
+        except Exception as e:
+            logger.error(f"Error cleaning up {filepath}: {e}")
+
+def process_with_timeout(func, *args, **kwargs):
+    """Execute a function with timeout."""
+    result = [None]
+    exception = [None]
+    
+    def target():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+    
+    thread = threading.Thread(target=target)
+    thread.daemon = True
+    thread.start()
+    thread.join(timeout=PROCESSING_TIMEOUT)
+    
+    if thread.is_alive():
+        logger.error("Processing timeout - killing thread")
+        return None
+    
+    if exception[0]:
+        raise exception[0]
+    
+    return result[0]
 
 @app.route('/')
 def index():
@@ -79,6 +129,8 @@ def index():
 @app.route('/merge-videos', methods=['POST'])
 def merge_videos():
     """Handle video merging request."""
+    video_files = []
+    
     try:
         if 'files' not in request.files:
             return jsonify({'error': 'No files uploaded'}), 400
@@ -88,7 +140,6 @@ def merge_videos():
             return jsonify({'error': 'No files selected'}), 400
         
         # Validate files and check sizes
-        video_files = []
         total_size = 0
         
         for file in files:
@@ -112,9 +163,11 @@ def merge_videos():
         
         # Check total size
         if total_size > MAX_TOTAL_SIZE:
+            cleanup_files(video_files)
             return jsonify({'error': f'Total file size ({format_file_size(total_size)}) exceeds limit ({format_file_size(MAX_TOTAL_SIZE)})'}), 400
         
         if len(video_files) < 2:
+            cleanup_files(video_files)
             return jsonify({'error': 'At least 2 video files are required'}), 400
         
         # Get parameters
@@ -125,17 +178,20 @@ def merge_videos():
         unique_id = str(uuid.uuid4())[:8]
         output_filename = f"{Path(output_name).stem}_{unique_id}.mp4"
         
-        # Merge videos
+        # Merge videos with timeout
         merger = VideoMerger(output_dir=app.config['OUTPUT_FOLDER'])
-        result = merger.merge_videos(video_files, output_filename, method)
+        
+        def merge_task():
+            return merger.merge_videos(video_files, output_filename, method)
+        
+        result = process_with_timeout(merge_task)
         
         if result:
             # Clean up uploaded files
-            for filepath in video_files:
-                try:
-                    os.remove(filepath)
-                except:
-                    pass
+            cleanup_files(video_files)
+            
+            # Force garbage collection
+            gc.collect()
             
             return jsonify({
                 'success': True,
@@ -144,15 +200,19 @@ def merge_videos():
                 'filename': Path(result).name
             })
         else:
-            return jsonify({'error': 'Failed to merge videos'}), 500
+            cleanup_files(video_files)
+            return jsonify({'error': 'Processing timeout or failed to merge videos'}), 500
             
     except Exception as e:
         logger.error(f"Error merging videos: {e}")
+        cleanup_files(video_files)
         return jsonify({'error': f'Error: {str(e)}'}), 500
 
 @app.route('/convert-audio', methods=['POST'])
 def convert_audio():
     """Handle audio to video conversion request."""
+    audio_file = None
+    
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
@@ -176,6 +236,7 @@ def convert_audio():
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
+        audio_file = filepath
         
         # Get parameters
         resolution_width = int(request.form.get('resolution_width', 1920))
@@ -193,22 +254,26 @@ def convert_audio():
         else:
             output_filename = f"{Path(filename).stem}_video_{unique_id}.mp4"
         
-        # Convert audio to video
+        # Convert audio to video with timeout
         converter = AudioToVideoConverter(output_dir=app.config['OUTPUT_FOLDER'])
-        result = converter.convert_audio_to_video(
-            audio_path=filepath,
-            output_name=output_filename,
-            resolution=(resolution_width, resolution_height),
-            fps=fps,
-            color=(color_r, color_g, color_b)
-        )
+        
+        def convert_task():
+            return converter.convert_audio_to_video(
+                audio_path=filepath,
+                output_name=output_filename,
+                resolution=(resolution_width, resolution_height),
+                fps=fps,
+                color=(color_r, color_g, color_b)
+            )
+        
+        result = process_with_timeout(convert_task)
         
         if result:
             # Clean up uploaded file
-            try:
-                os.remove(filepath)
-            except:
-                pass
+            cleanup_files([filepath])
+            
+            # Force garbage collection
+            gc.collect()
             
             return jsonify({
                 'success': True,
@@ -217,10 +282,13 @@ def convert_audio():
                 'filename': Path(result).name
             })
         else:
-            return jsonify({'error': 'Failed to convert audio to video'}), 500
+            cleanup_files([filepath])
+            return jsonify({'error': 'Processing timeout or failed to convert audio to video'}), 500
             
     except Exception as e:
         logger.error(f"Error converting audio: {e}")
+        if audio_file:
+            cleanup_files([audio_file])
         return jsonify({'error': f'Error: {str(e)}'}), 500
 
 @app.route('/download/<filename>')
@@ -239,7 +307,32 @@ def download_file(filename):
 @app.route('/health')
 def health():
     """Health check endpoint for Render.com."""
-    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+    try:
+        # Check disk space
+        import shutil
+        total, used, free = shutil.disk_usage('.')
+        free_gb = free / (1024**3)
+        
+        # Check memory usage
+        import psutil
+        memory = psutil.virtual_memory()
+        memory_percent = memory.percent
+        
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'disk_free_gb': round(free_gb, 2),
+            'memory_percent': round(memory_percent, 2),
+            'max_file_size_mb': MAX_FILE_SIZE // (1024 * 1024),
+            'max_total_size_mb': MAX_TOTAL_SIZE // (1024 * 1024)
+        })
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

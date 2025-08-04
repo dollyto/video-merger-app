@@ -1,175 +1,107 @@
-# Deployment Guide
-
-This guide will help you deploy the Video Merger & Audio Converter web application to Render.com's free tier.
+# Video Merger Deployment Guide
 
 ## Render.com Deployment
 
-### Prerequisites
-- A GitHub account
-- A Render.com account (free)
+This application is optimized for Render.com's free tier with the following constraints:
 
-### Step 1: Prepare Your Repository
+### Resource Limits (Free Tier)
+- **Memory**: 512MB RAM
+- **CPU**: Limited processing power
+- **Storage**: 1GB disk space
+- **Timeout**: 15 minutes for web requests
 
-1. **Push your code to GitHub:**
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/yourusername/video-merger.git
-   git push -u origin main
-   ```
+### Optimizations Made
 
-### Step 2: Deploy to Render.com
+1. **Reduced File Size Limits**:
+   - Max file size: 100MB per file
+   - Max total size: 200MB per request
 
-1. **Go to Render.com Dashboard:**
-   - Visit [render.com](https://render.com)
-   - Sign up or log in
+2. **Gunicorn Configuration**:
+   - Single worker to prevent memory issues
+   - 5-minute timeout for video processing
+   - Max 10 requests per worker before restart
 
-2. **Create New Web Service:**
-   - Click "New +"
-   - Select "Web Service"
-   - Connect your GitHub repository
+3. **Memory Management**:
+   - Automatic garbage collection
+   - File cleanup after processing
+   - Memory usage monitoring
 
-3. **Configure the Service:**
-   - **Name:** `video-merger-app` (or any name you prefer)
-   - **Environment:** `Python 3`
-   - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `gunicorn app:app --bind 0.0.0.0:$PORT`
+4. **Error Handling**:
+   - Timeout handling for long operations
+   - Graceful cleanup on errors
+   - Better error messages
 
-4. **Environment Variables (Optional):**
-   - `SECRET_KEY`: A random string for Flask security
-   - `PYTHON_VERSION`: `3.11.0`
+### Troubleshooting
 
-5. **Deploy:**
-   - Click "Create Web Service"
-   - Wait for the build to complete (5-10 minutes)
+#### Worker Timeout Issues
+If you see `WORKER TIMEOUT` errors:
 
-### Step 3: Access Your Application
+1. **Reduce file sizes**: Upload smaller video files
+2. **Check file formats**: Use MP4 format for best compatibility
+3. **Monitor memory**: Check `/health` endpoint for system status
 
-- Once deployed, Render will provide a URL like: `https://your-app-name.onrender.com`
-- Your web application is now live!
+#### Memory Issues
+If you see `SIGKILL` errors:
 
-## Alternative Deployment Options
+1. **Restart the service**: Memory leaks are cleaned up on restart
+2. **Wait between requests**: Allow time for garbage collection
+3. **Use smaller videos**: Reduce resolution or duration
 
-### Heroku
-```bash
-# Install Heroku CLI
-# Create Procfile (already included)
-# Deploy
-heroku create your-app-name
-git push heroku main
+#### File Upload Issues
+If uploads fail:
+
+1. **Check file size**: Ensure files are under 100MB
+2. **Check file format**: Use supported formats only
+3. **Check total size**: Multiple files must be under 200MB total
+
+### Health Check
+
+Visit `/health` to check:
+- System status
+- Available disk space
+- Memory usage
+- Current file size limits
+
+### Best Practices
+
+1. **File Preparation**:
+   - Compress videos before uploading
+   - Use MP4 format for best compatibility
+   - Keep individual files under 50MB for reliable processing
+
+2. **Processing**:
+   - Process one request at a time
+   - Wait for completion before starting new requests
+   - Monitor the health endpoint
+
+3. **Monitoring**:
+   - Check logs for memory usage
+   - Monitor disk space
+   - Watch for timeout errors
+
+### Environment Variables
+
+The following environment variables can be adjusted:
+
+```yaml
+MAX_FILE_SIZE: 100000000  # 100MB per file
+MAX_TOTAL_SIZE: 200000000  # 200MB total
+GUNICORN_TIMEOUT: 300  # 5 minutes
+GUNICORN_WORKERS: 1  # Single worker
 ```
 
-### Railway
-1. Connect your GitHub repository
-2. Railway will auto-detect Python
-3. Deploy automatically
+### Upgrading to Paid Tier
 
-### Vercel
-1. Connect your GitHub repository
-2. Set build command: `pip install -r requirements.txt`
-3. Set start command: `gunicorn app:app --bind 0.0.0.0:$PORT`
+For better performance, consider upgrading to a paid tier which provides:
+- More memory (1GB+)
+- More CPU resources
+- Longer timeouts
+- Better reliability
 
-## Local Development
+### Support
 
-### Run Locally
-```bash
-# Activate virtual environment
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the application
-python app.py
-```
-
-### Access Locally
-- Open your browser to `http://localhost:8080`
-
-## Features Available in Web App
-
-### Video Merger
-- ✅ Upload multiple video files
-- ✅ Choose merge method (concatenate/overlay)
-- ✅ Custom output filename
-- ✅ Drag & drop interface
-- ✅ Progress tracking
-
-### Audio to Video Converter
-- ✅ Upload audio files
-- ✅ Customizable resolution
-- ✅ Adjustable FPS
-- ✅ Custom background colors
-- ✅ Real-time color preview
-
-### General Features
-- ✅ Modern, responsive UI
-- ✅ File validation
-- ✅ Automatic cleanup (1 hour)
-- ✅ Download functionality
-- ✅ Error handling
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Build Fails:**
-   - Check Python version compatibility
-   - Ensure all dependencies are in requirements.txt
-   - Verify file paths are correct
-
-2. **App Won't Start:**
-   - Check the start command in Render dashboard
-   - Verify PORT environment variable is set
-   - Check logs for specific errors
-
-3. **File Upload Issues:**
-   - Ensure file size is under 500MB
-   - Check file format is supported
-   - Verify upload directory permissions
-
-4. **Processing Errors:**
-   - Check if FFmpeg is available (auto-installed with moviepy)
-   - Verify sufficient memory for video processing
-   - Check file permissions
-
-### Render.com Free Tier Limitations
-
-- **Build Time:** 15 minutes max
-- **Runtime:** 750 hours/month
-- **Memory:** 512MB RAM
-- **Storage:** 1GB
-- **Sleep:** App sleeps after 15 minutes of inactivity
-
-### Performance Tips
-
-1. **For Large Files:**
-   - Consider processing in smaller chunks
-   - Use lower resolution for testing
-   - Monitor memory usage
-
-2. **For Better Performance:**
-   - Use compressed video formats
-   - Optimize file sizes before upload
-   - Consider upgrading to paid tier for larger files
-
-## Security Notes
-
-- Files are automatically cleaned up after 1 hour
-- Upload size is limited to 500MB per file and 1GB total (configurable via MAX_FILE_SIZE and MAX_TOTAL_SIZE environment variables)
-- Only supported file formats are accepted
-- SECRET_KEY is auto-generated by Render
-
-## Support
-
-If you encounter issues:
-1. Check the application logs in Render dashboard
-2. Verify all files are properly committed to GitHub
-3. Test locally before deploying
-4. Check Render.com status page for service issues
-
----
-
-**Happy Deploying! 🚀** 
+If issues persist:
+1. Check the application logs in Render.com dashboard
+2. Monitor the `/health` endpoint
+3. Try with smaller test files first
+4. Consider upgrading to a paid tier for production use 

@@ -6,6 +6,8 @@ Video Merger - A Python tool to merge/stitch multiple videos into a single video
 import os
 import sys
 import argparse
+import gc
+import psutil
 from pathlib import Path
 from typing import List, Optional, Tuple
 import logging
@@ -33,6 +35,16 @@ class VideoMerger:
             format='%(asctime)s - %(levelname)s - %(message)s'
         )
         self.logger = logging.getLogger(__name__)
+    
+    def get_memory_usage(self):
+        """Get current memory usage in MB."""
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024
+    
+    def log_memory_usage(self, stage: str):
+        """Log memory usage at different stages."""
+        memory_mb = self.get_memory_usage()
+        self.logger.info(f"Memory usage at {stage}: {memory_mb:.1f} MB")
     
     def validate_video_file(self, file_path: str) -> bool:
         """
@@ -94,6 +106,8 @@ class VideoMerger:
             self.logger.error("No video files provided")
             return None
         
+        self.log_memory_usage("start")
+        
         # Validate all video files
         valid_videos = []
         for video_path in video_paths:
@@ -130,6 +144,10 @@ class VideoMerger:
         except Exception as e:
             self.logger.error(f"Error merging videos: {e}")
             return None
+        finally:
+            # Force garbage collection
+            gc.collect()
+            self.log_memory_usage("end")
     
     def _concatenate_videos(self, video_paths: List[str], output_name: str) -> str:
         """
@@ -143,38 +161,56 @@ class VideoMerger:
             str: Path to the merged video
         """
         self.logger.info("Starting video concatenation...")
+        self.log_memory_usage("concatenate_start")
         
-        # Load all video clips
         clips = []
-        for i, video_path in enumerate(video_paths):
-            self.logger.info(f"Loading video {i+1}/{len(video_paths)}: {Path(video_path).name}")
-            clip = VideoFileClip(video_path)
-            clips.append(clip)
-        
-        # Concatenate clips
-        self.logger.info("Concatenating videos...")
-        final_clip = concatenate_videoclips(clips, method="compose")
-        
-        # Save the merged video
-        output_path = self.output_dir / output_name
-        self.logger.info(f"Saving merged video to: {output_path}")
-        final_clip.write_videofile(
-            str(output_path),
-            codec='libx264',
-            audio_codec='aac',
-            temp_audiofile='temp-audio.m4a',
-            remove_temp=True
-        )
-        
-        # Clean up
-        final_clip.close()
-        for clip in clips:
-            clip.close()
-        
-        self.logger.info(f"Video merging completed successfully!")
-        self.logger.info(f"Output file: {output_path}")
-        
-        return str(output_path)
+        try:
+            # Load all video clips
+            for i, video_path in enumerate(video_paths):
+                self.logger.info(f"Loading video {i+1}/{len(video_paths)}: {Path(video_path).name}")
+                clip = VideoFileClip(video_path)
+                clips.append(clip)
+                self.log_memory_usage(f"loaded_video_{i+1}")
+            
+            # Concatenate clips
+            self.logger.info("Concatenating videos...")
+            final_clip = concatenate_videoclips(clips, method="compose")
+            self.log_memory_usage("concatenated")
+            
+            # Save the merged video
+            output_path = self.output_dir / output_name
+            self.logger.info(f"Saving merged video to: {output_path}")
+            final_clip.write_videofile(
+                str(output_path),
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile='temp-audio.m4a',
+                remove_temp=True,
+                verbose=False,
+                logger=None
+            )
+            
+            self.logger.info(f"Video merging completed successfully!")
+            self.logger.info(f"Output file: {output_path}")
+            
+            return str(output_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error in concatenation: {e}")
+            raise
+        finally:
+            # Clean up clips
+            try:
+                if 'final_clip' in locals():
+                    final_clip.close()
+                for clip in clips:
+                    clip.close()
+            except Exception as e:
+                self.logger.error(f"Error closing clips: {e}")
+            
+            # Force garbage collection
+            gc.collect()
+            self.log_memory_usage("concatenate_end")
     
     def _overlay_videos(self, video_paths: List[str], output_name: str) -> str:
         """
@@ -188,60 +224,80 @@ class VideoMerger:
             str: Path to the merged video
         """
         self.logger.info("Starting video overlay...")
+        self.log_memory_usage("overlay_start")
         
         if len(video_paths) < 2:
             self.logger.error("Overlay method requires at least 2 videos")
             return None
         
-        # Load the main video (first video)
-        main_clip = VideoFileClip(video_paths[0])
-        
-        # Load overlay videos
+        main_clip = None
         overlay_clips = []
-        for i, video_path in enumerate(video_paths[1:], 1):
-            self.logger.info(f"Loading overlay video {i}: {Path(video_path).name}")
-            clip = VideoFileClip(video_path)
-            # Resize overlay videos to be smaller
-            clip = clip.resize(width=main_clip.w // 4, height=main_clip.h // 4)
-            overlay_clips.append(clip)
         
-        # Position overlay videos in corners
-        positions = [
-            ('top-left', (0, 0)),
-            ('top-right', (main_clip.w - overlay_clips[0].w, 0)),
-            ('bottom-left', (0, main_clip.h - overlay_clips[0].h)),
-            ('bottom-right', (main_clip.w - overlay_clips[0].w, main_clip.h - overlay_clips[0].h))
-        ]
-        
-        # Create composite video
-        final_clip = main_clip
-        for i, (clip, (pos_name, pos)) in enumerate(zip(overlay_clips, positions)):
-            if i < len(positions):
-                self.logger.info(f"Adding overlay {i+1} at {pos_name}")
-                final_clip = final_clip.set_position(pos).set_duration(clip.duration)
-                final_clip = final_clip.set_position(pos)
-        
-        # Save the merged video
-        output_path = self.output_dir / output_name
-        self.logger.info(f"Saving merged video to: {output_path}")
-        final_clip.write_videofile(
-            str(output_path),
-            codec='libx264',
-            audio_codec='aac',
-            temp_audiofile='temp-audio.m4a',
-            remove_temp=True
-        )
-        
-        # Clean up
-        final_clip.close()
-        main_clip.close()
-        for clip in overlay_clips:
-            clip.close()
-        
-        self.logger.info(f"Video overlay completed successfully!")
-        self.logger.info(f"Output file: {output_path}")
-        
-        return str(output_path)
+        try:
+            # Load the main video (first video)
+            main_clip = VideoFileClip(video_paths[0])
+            
+            # Load overlay videos
+            for i, video_path in enumerate(video_paths[1:], 1):
+                self.logger.info(f"Loading overlay video {i}: {Path(video_path).name}")
+                clip = VideoFileClip(video_path)
+                # Resize overlay videos to be smaller
+                clip = clip.resize(width=main_clip.w // 4, height=main_clip.h // 4)
+                overlay_clips.append(clip)
+                self.log_memory_usage(f"loaded_overlay_{i}")
+            
+            # Position overlay videos in corners
+            positions = [
+                ('top-left', (0, 0)),
+                ('top-right', (main_clip.w - overlay_clips[0].w, 0)),
+                ('bottom-left', (0, main_clip.h - overlay_clips[0].h)),
+                ('bottom-right', (main_clip.w - overlay_clips[0].w, main_clip.h - overlay_clips[0].h))
+            ]
+            
+            # Create composite video
+            final_clip = main_clip
+            for i, (clip, (pos_name, pos)) in enumerate(zip(overlay_clips, positions)):
+                if i < len(positions):
+                    self.logger.info(f"Adding overlay {i+1} at {pos_name}")
+                    final_clip = final_clip.set_position(pos).set_duration(clip.duration)
+                    final_clip = final_clip.set_position(pos)
+            
+            # Save the merged video
+            output_path = self.output_dir / output_name
+            self.logger.info(f"Saving merged video to: {output_path}")
+            final_clip.write_videofile(
+                str(output_path),
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile='temp-audio.m4a',
+                remove_temp=True,
+                verbose=False,
+                logger=None
+            )
+            
+            self.logger.info(f"Video overlay completed successfully!")
+            self.logger.info(f"Output file: {output_path}")
+            
+            return str(output_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error in overlay: {e}")
+            raise
+        finally:
+            # Clean up clips
+            try:
+                if 'final_clip' in locals():
+                    final_clip.close()
+                if main_clip:
+                    main_clip.close()
+                for clip in overlay_clips:
+                    clip.close()
+            except Exception as e:
+                self.logger.error(f"Error closing clips: {e}")
+            
+            # Force garbage collection
+            gc.collect()
+            self.log_memory_usage("overlay_end")
     
     def list_supported_formats(self) -> List[str]:
         """

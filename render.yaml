@@ -4,9 +4,17 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 300 --workers 1 --worker-class sync --max-requests 10 --max-requests-jitter 5
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: SECRET_KEY
-        generateValue: true 
+        generateValue: true
+      - key: MAX_FILE_SIZE
+        value: "100000000"
+      - key: MAX_TOTAL_SIZE
+        value: "200000000"
+      - key: GUNICORN_TIMEOUT
+        value: "300"
+      - key: GUNICORN_WORKERS
+        value: "1" 
