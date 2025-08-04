@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-from moviepy import AudioFileClip, ColorClip, CompositeVideoClip
+from moviepy.editor import AudioFileClip, ColorClip, CompositeVideoClip
 import numpy as np
 
 

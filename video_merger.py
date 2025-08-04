@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 import logging
 
-from moviepy import VideoFileClip, concatenate_videoclips
+from moviepy.editor import VideoFileClip, concatenate_videoclips
 import numpy as np
 
 
